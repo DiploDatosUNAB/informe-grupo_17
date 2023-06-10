@@ -1,0 +1,174 @@
+---
+title: "Analisis de encuestas elecciones 2023"
+author: "Sofía Giménez Gritti"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# Cargar los paquetes necesarios acá
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+library(knitr)
+library(lubridate)
+```
+
+
+
+## Introducción
+Dado que nos encontramos en un año electoral, con una alta demanda de análisis de encuestas, tomaremos los datos recopilados en este enlace (https://es.wikipedia.org/wiki/Anexo:Encuestas_de_intenci%C3%B3n_de_voto_para_las_elecciones_presidenciales_de_Argentina_de_2023) , de distintas encuestadoras para medir la intención de voto de los partidos relevados.
+La idea es poder construir una visualización válida para analizar el parorama electoral de cara a las próximas elecciones.
+
+
+## Exploración de los datos
+Cargamos el paquete a utilizar, en este caso, una extracción de los datos de las encuestas, con la construcicón de un csv. Observaremos las primeras filas del mismo, y recorreremos sus columnas
+```{r}
+url <- "https://github.com/DiploDatosUNAB/informe-grupo_17/raw/main/datos/encuestas_datos.csv"
+encuestas <- read.csv2(url)
+head(encuestas)
+```
+
+```{r}
+encuestas$Fecha <- as.Date(encuestas$Fecha, format = "%d/%m/%Y")
+```
+
+```{r}
+colnames(encuestas)
+```
+Como podemos observar en la salida, los partidos analizados son: Todos, Juntos, Libertad_Avanza, Consenso_Federal, FIT, y también analiza Otros, Blanco, e Indecisos. A su vez posee los datos de encuestadora, muestra y fecha.    
+
+```{r}
+str(encuestas)
+```
+Podemos observar que los tipos de datos son correctos para el procesamiento.
+
+```{r}
+datos_columnas <- apply(encuestas, 2, function(x) length(na.omit(x)))
+print(datos_columnas)
+```
+
+En el código anterior podemos ver la cantidad de datos que tiene cada columna, ignorando los nulos. Eso nos da un panorama de qué partidos o indicadores fueron los más relevados, y a su vez, observar la cantitad de datos faltantes sobre encuestadora y muestra. 
+
+```{r}
+encuestas_alargadas <- pivot_longer(encuestas, 
+                                    cols = c(Todos, Juntos, Libertad_Avanza, Consenso_Federal, Indecisos), 
+                                    names_to = "Partido", 
+                                    values_to = "Intencion_voto")
+encuestas_alargadas$Fecha <- as.Date(encuestas_alargadas$Fecha, format = "%d/%m/%Y")
+encuestas_alargadas$Intencion_voto <- as.numeric(encuestas_alargadas$Intencion_voto)
+
+resultados <- encuestas_alargadas %>%
+  group_by(Partido) %>%
+  summarise(Media = mean(Intencion_voto, na.rm = TRUE),
+            Mediana = median(Intencion_voto, na.rm = TRUE),
+            Minimo = min(Intencion_voto, na.rm = TRUE),
+            Maximo = max(Intencion_voto, na.rm = TRUE))
+
+print(resultados)
+```
+
+Podemos obtener distintas observaciones de los calculos estadísticos construidos (Fue modificado tras la primera entrega): 
+
+- Para poder procesarlos debimos transformar los datos y en las formulas evitar los nulos. En ese sentido, se procesaron generando una tabla para facilitar su lectura.
+- Observamos que la media y la mediana de Juntos se eleva por encima de la del Frente de Todos. Como así también el máximo.
+- Es una elección mulripartidaria donde los porcentajes máximos, y medios de los partidos son similares. 
+- Existe un altmo grado de indecisos, por lo tanto, un alto grado de desconcierto sobre el resultado.
+
+## Hipótesis
+- Existe una correlación entre resultados y fecha que genera una alta varianza entre los porcentajes obtenidos por frente.
+- Existe una diferencia de encuestadora, que podría sesgar los resultados estadísticos.
+- Existe una paridad entre los 3 partidos mayoritarios que se mantiene en el tiempo por lo que las encuestas no permiten predecir el ballotaje.
+- Cómo fluctuan los votos entre los partidos.
+
+# TP 2: análisis detallado
+### 1) Pregunta 1: Existe una correlación entre resultados y fecha que genera una alta varianza entre los porcentajes obtenidos por frente.
+
+```{r}
+ggplot(encuestas, aes(x = Fecha)) +
+  geom_smooth(aes(y = Todos, color = "Todos"), se = FALSE) +
+  geom_smooth(aes(y = Juntos, color = "Juntos"), se = FALSE) +
+  geom_smooth(aes(y = Libertad_Avanza, color = "Libertad_Avanza"), se = FALSE) +
+  geom_smooth(aes(y = Consenso_Federal, color = "Consenso_Federal"), se = FALSE) +
+  geom_smooth(aes(y = FIT, color = "FIT"), se = FALSE) +
+  labs(x = "Fecha", y = "Porcentaje", color = "Frente") +
+  theme_minimal()
+```
+
+En el gráfico de tendencia construido, se puede observar, en referencia a la pregunta, la gran fluctuación que se dió a lo largo de este año en votos donde los dos partidos mayoritarios perdieron un gran caudal de votos que parece a ver sido redirigido a la tercera fuerza, Libertad Avanza, quién la tendencia lo marca como el primero en las últimas mediciones.
+
+### 2) Existe una diferencia de encuestadora, que podría sesgar los resultados estadísticos.
+
+```{r}
+resumen <- encuestas %>%
+  group_by(Encuestadora, month(Fecha)) %>%
+  summarize(
+    Promedio_Todos = mean(Todos),
+    Desviacion_Todos = sd(Todos),
+    Promedio_Juntos = mean(Juntos),
+    Desviacion_Juntos = sd(Juntos),
+    Promedio_Libertad_Avanza = mean(Libertad_Avanza),
+    Desviacion_Libertad_Avanza = sd(Libertad_Avanza),
+    Promedio_Consenso_Federal = mean(Consenso_Federal),
+    Desviacion_Consenso_Federal = sd(Consenso_Federal),
+    Promedio_FIT = mean(FIT),
+    Desviacion_FIT = sd(FIT)
+  )
+
+resumen <- resumen[order(resumen$`month(Fecha)`), ]
+tabla_formateada <- kable(resumen, format = "html", table.attr = "class='styled-table'")
+tabla_formateada
+```
+
+En respuesta a la pregunta, podemos ver la gran diferencia en el promedio que obtienen los partidos mes a mes según la encuestadora, permitiendonos plantear la idea de que puede existir un sesgo en base al formato de la medición.
+
+### 3) Existe una paridad entre los 3 partidos mayoritarios que se mantiene en el tiempo por lo que las encuestas no permiten predecir el ballotaje.
+
+```{r}
+encuestas$Fecha <- as.Date(encuestas$Fecha, format = "%d/%m/%Y")
+encuestas$Mes <- format(encuestas$Fecha, "%Y-%m")
+promedio_mes <- encuestas %>%
+  group_by(Mes) %>%
+  summarise(
+    Promedio_Todos = mean(Todos),
+    Promedio_Juntos = mean(Juntos),
+    Promedio_Libertad_Avanza = mean(Libertad_Avanza)
+  )
+print(promedio_mes)
+```
+Como se puede observar, según las encuestas relevadas, se espera una elección de 3 tercios, por lo que es imposible determinar cuáles van a ser participes del ballotaje según este resultado. Claramente, si se mantienen estos datos, si se puede garantizar la probabilidad de un ballotaje porque ninguno cumple los requisitos de mayoría absoluta relativa para obtener resultados en primera vuelta.
+
+### 4) Cómo fluctúan los votos en los partidos.
+```{r}
+encuestas$Fecha <- as.Date(encuestas$Fecha, format = "%d/%m/%Y")
+encuestas$Mes <- format(encuestas$Fecha, "%Y-%m")
+encuestas_sin_nulos <- encuestas[complete.cases(encuestas$Todos), ]
+intervalos_confianza <- encuestas_sin_nulos %>%
+  group_by(Mes) %>%
+  summarise(
+    Promedio_Todos = mean(Todos),
+    Promedio_Juntos = mean(Juntos),
+    Promedio_Libertad_Avanza = mean(Libertad_Avanza),
+    IC_Todos = ifelse(n() > 1, paste0("[", formatC(t.test(Todos)$conf.int[1], format = "f", digits = 2), " - ", formatC(t.test(Todos)$conf.int[2], format = "f", digits = 2), "]"), "N/A"),
+    IC_Juntos = ifelse(n() > 1, paste0("[", formatC(t.test(Juntos)$conf.int[1], format = "f", digits = 2), " - ", formatC(t.test(Juntos)$conf.int[2], format = "f", digits = 2), "]"), "N/A"),
+    IC_Libertad_Avanza = ifelse(n() > 1, paste0("[", formatC(t.test(Libertad_Avanza)$conf.int[1], format = "f", digits = 2), " - ", formatC(t.test(Libertad_Avanza)$conf.int[2], format = "f", digits = 2), "]"), "N/A")
+  )
+
+tabla_intervalos_confianza <- data.frame(
+  Mes = intervalos_confianza$Mes,
+  Promedio_Todos = intervalos_confianza$Promedio_Todos,
+  IC_Todos = intervalos_confianza$IC_Todos,
+  Promedio_Juntos = intervalos_confianza$Promedio_Juntos,
+  IC_Juntos = intervalos_confianza$IC_Juntos,
+  Promedio_Libertad_Avanza = intervalos_confianza$Promedio_Libertad_Avanza,
+  IC_Libertad_Avanza = intervalos_confianza$IC_Libertad_Avanza
+)
+
+print(tabla_intervalos_confianza)
+
+```
+
+
+En la tabla se construyó el intervalo de confianza de los partidos por mes, allí podemos ver la fluctuación de votos más clara que en la anterior, y en términos específicos viendo los intervalos, determinar las diferencias entre los tres partidos mayoritarios. 
+Dada la variabilidad antes dicha, existe una gran amplitud en los intervalos de confianza fijados al 95%) por lo que la fluctuación de votos es dificil de dictaminar. Si se puede ver una mayor pedidada de votos de Juntos a favor de Libertad Avanza.
